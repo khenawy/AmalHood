@@ -1,0 +1,60 @@
+name: Deploy to C:\WWW\AmalHood
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-amalhood
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, windows]
+
+    env:
+      DEPLOY_PATH: C:\WWW\AmalHood
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Deploy site files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $source = "${{ github.workspace }}"
+          $target = $env:DEPLOY_PATH
+
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+
+          # /MIR mirrors the repo into the deploy folder (removes stale files).
+          # Anything excluded here stays out of the published site.
+          $excludeDirs = @(
+            (Join-Path $source ".git"),
+            (Join-Path $source ".github")
+          )
+          $excludeFiles = @(
+            "README.md",
+            "package.json",
+            ".gitignore"
+          )
+
+          robocopy $source $target /MIR /XD $excludeDirs /XF $excludeFiles /NFL /NDL /NP /R:2 /W:2
+
+          # robocopy exit codes below 8 indicate success.
+          if ($LASTEXITCODE -ge 8) {
+            throw "robocopy failed with exit code $LASTEXITCODE"
+          }
+          exit 0
+
+      - name: Verify deployment
+        shell: powershell
+        run: |
+          $index = Join-Path $env:DEPLOY_PATH "index.html"
+          if (-not (Test-Path $index)) {
+            throw "index.html missing from $env:DEPLOY_PATH"
+          }
+          Write-Host "Deployed to $env:DEPLOY_PATH"
+          Get-ChildItem $env:DEPLOY_PATH | Select-Object Name, Length
